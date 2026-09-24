@@ -1,0 +1,17 @@
+{
+  "name": "clip-station",
+  "version": "1.0.0",
+  "description": "Clip Station: trim a video in the browser and turn the selection into a GIF.",
+  "type": "module",
+  "private": true,
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js"
+  },
+  "dependencies": {
+    "express": "4.22.3"
+  }
+}

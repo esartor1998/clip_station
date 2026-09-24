@@ -1,0 +1,598 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Clip Station</title>
+<!-- empty icon so browsers stop asking for a favicon.ico we don't ship -->
+<link rel="icon" href="data:,">
+<!-- gifenc is the only third-party code, imported straight from jsDelivr at a
+     pinned version inside app.js. no import map on purpose: an inline script
+     would need its own CSP hash, and one dependency doesn't earn that -->
+
+<style>
+  :root {
+    --bg:        #0d0f12;
+    --surface:   #16191e;
+    --surface-2: #1c2027;
+    --line:      #2a2f38;
+    --text:      #e6e9ee;
+    --muted:     #808a98;
+    --faint:     #59616e;
+    --accent:    #ffc24b;   /* signal amber, the one loud colour */
+    --accent-hi: #ffce6d;
+    --accent-dim:#5a4a24;
+    --on-accent: #1a1205;
+    --danger:    #ff6b6b;
+    --panel-bg:  rgba(22,25,30,.94);
+    --shade:     rgba(13,15,18,.72);
+    --mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+    --sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    --dock-h: 148px;
+    --panel-w: 280px;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  html, body { height: 100%; }
+
+  body {
+    font-family: var(--sans);
+    color: var(--text);
+    background: var(--bg);
+    overflow: hidden;
+    display: grid;
+    grid-template-rows: auto 1fr auto;
+  }
+
+  /* ---- the control rail at the top ----------------------------------------- */
+  #rail {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 10px 14px;
+    background: var(--surface);
+    border-bottom: 1px solid var(--line);
+    min-width: 0;
+  }
+
+  .brand {
+    font-family: var(--mono);
+    font-size: 12px;
+    letter-spacing: .18em;
+    text-transform: uppercase;
+    color: var(--muted);
+    white-space: nowrap;
+  }
+  .brand b { color: var(--accent); font-weight: 600; }
+
+  .rail-group { display: flex; align-items: center; gap: 8px; min-width: 0; }
+  .divider { width: 1px; height: 24px; background: var(--line); flex: none; }
+
+  input[type="url"] {
+    width: min(42vw, 460px);
+    min-width: 0;
+    font-family: var(--mono);
+    font-size: 13px;
+    color: var(--text);
+    background: var(--surface-2);
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    padding: 8px 11px;
+    outline: none;
+    transition: border-color .15s;
+  }
+  input[type="url"]::placeholder { color: var(--faint); }
+  input[type="url"]:focus { border-color: var(--accent); }
+
+  button, .filelabel {
+    font-family: var(--sans);
+    font-size: 13px;
+    color: var(--text);
+    background: var(--surface-2);
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    padding: 8px 13px;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: border-color .15s, background .15s;
+  }
+  button:hover, .filelabel:hover { border-color: var(--accent); }
+  button:focus-visible, .filelabel:focus-within,
+  input:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+  button:disabled { opacity: .45; cursor: not-allowed; border-color: var(--line); }
+
+  .primary { background: var(--accent); color: var(--on-accent); border-color: var(--accent); font-weight: 600; }
+  .primary:hover { background: var(--accent-hi); }
+  .primary:disabled { background: var(--accent-dim); border-color: var(--accent-dim); }
+
+  #file { display: none; }
+
+  /* ---- main area: the video stage and the settings panel ------------------- */
+  #main {
+    display: grid;
+    grid-template-columns: 1fr var(--panel-w);
+    min-height: 0;
+  }
+
+  #stage {
+    position: relative;
+    min-width: 0; min-height: 0;
+    display: flex; align-items: center; justify-content: center;
+    padding: 14px;
+    overflow: hidden;
+  }
+  #video {
+    display: none;
+    max-width: 100%; max-height: 100%;
+    border-radius: 6px;
+    background: #000;
+    box-shadow: 0 0 0 1px var(--line);
+  }
+  #video.show { display: block; }
+
+  #empty {
+    display: grid; gap: 12px; justify-items: center; text-align: center;
+    padding: 34px 40px;
+    border: 1px dashed var(--line);
+    border-radius: 12px;
+    font-family: var(--mono); font-size: 13px; color: var(--muted);
+  }
+  #empty.hide { display: none; }
+  #empty .big { font-size: 15px; color: var(--text); }
+
+  /* ---- the settings panel -------------------------------------------------- */
+  #panel {
+    margin: 14px 14px 14px 0;
+    align-self: start;
+    max-height: calc(100% - 28px);
+    overflow-y: auto;
+    scrollbar-width: none;
+    background: var(--panel-bg);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+  }
+  #panel::-webkit-scrollbar { display: none; }
+  #panel .phead {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 10px 13px;
+    font-family: var(--mono); font-size: 11px; letter-spacing: .16em;
+    text-transform: uppercase; color: var(--muted);
+    border-bottom: 1px solid var(--line);
+  }
+  #panel .phead b { color: var(--accent); font-weight: 600; }
+  #panel .pbody { padding: 12px 13px 14px; display: grid; gap: 13px; }
+
+  .advbtn {
+    font-family: var(--mono); font-size: 9px; letter-spacing: .10em;
+    text-transform: uppercase; color: var(--muted);
+    background: var(--surface-2); border: 1px solid var(--line);
+    border-radius: 4px; padding: 2px 7px; cursor: pointer; line-height: 1.4;
+  }
+  .advbtn.on { background: var(--accent-dim); color: var(--accent); border-color: var(--accent); }
+
+  /* presets normally, the full set of sliders once advanced mode is on */
+  #panel .adv-ctl { display: none; }
+  #panel.advanced .simple-ctl { display: none; }
+  #panel.advanced .adv-ctl { display: grid; }
+
+  .ctl { display: grid; gap: 6px; }
+  .ctl .lbl {
+    display: flex; justify-content: space-between; align-items: baseline;
+    font-family: var(--mono); font-size: 11px; color: var(--muted);
+  }
+  .ctl .lbl .val { color: var(--accent); }
+
+  input[type="range"] {
+    -webkit-appearance: none; appearance: none;
+    width: 100%; height: 3px; border-radius: 2px;
+    background: var(--line); outline: none; cursor: pointer;
+  }
+  input[type="range"]::-webkit-slider-thumb {
+    -webkit-appearance: none; appearance: none;
+    width: 14px; height: 14px; border-radius: 50%;
+    background: var(--accent); cursor: pointer; border: 2px solid var(--on-accent);
+  }
+  input[type="range"]::-moz-range-thumb {
+    width: 14px; height: 14px; border-radius: 50%;
+    background: var(--accent); cursor: pointer; border: 2px solid var(--on-accent);
+  }
+
+  .seg { display: flex; gap: 4px; }
+  .seg button {
+    flex: 1; padding: 6px 0; font-family: var(--mono); font-size: 12px;
+    background: var(--surface-2); color: var(--muted);
+    border: 1px solid var(--line); border-radius: 5px; cursor: pointer;
+  }
+  .seg button.on { background: var(--accent-dim); color: var(--accent); border-color: var(--accent); }
+
+  .readout {
+    font-family: var(--mono); font-size: 11px; color: var(--muted);
+    display: grid; gap: 3px;
+    padding-top: 9px; border-top: 1px solid var(--line);
+  }
+  .readout .row { display: flex; justify-content: space-between; }
+  .readout .val { color: var(--text); }
+  .readout .val.over { color: var(--danger); }
+
+  .hint { font-family: var(--mono); font-size: 10px; line-height: 1.5; color: var(--muted); }
+  .hint.error { color: var(--danger); }
+  .hint[hidden] { display: none; }
+
+  #exportBtn { width: 100%; padding: 10px 13px; }
+
+  /* ---- the dock: transport, times, and the timeline ------------------------ */
+  #dock {
+    display: grid; gap: 9px;
+    padding: 10px 14px 14px;
+    background: var(--surface);
+    border-top: 1px solid var(--line);
+    min-height: var(--dock-h);
+  }
+  #dock.disabled { opacity: .45; pointer-events: none; }
+  #dock.disabled #timeline > :not(canvas) { visibility: hidden; }
+
+  .dock-row { display: flex; align-items: center; gap: 10px; min-width: 0; }
+  .dock-row .spacer { flex: 1; }
+
+  .iconbtn {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 34px; height: 32px; padding: 0;
+  }
+  .iconbtn svg { width: 16px; height: 16px; fill: currentColor; }
+  .iconbtn .alt { display: none; }
+  .iconbtn.toggled .main { display: none; }
+  .iconbtn.toggled .alt { display: inline; }
+
+  .smallbtn { font-family: var(--mono); font-size: 11.5px; padding: 6px 10px; }
+  .smallbtn.on { background: var(--accent-dim); color: var(--accent); border-color: var(--accent); }
+
+  .times {
+    font-family: var(--mono); font-size: 12px; color: var(--muted);
+    white-space: nowrap; font-variant-numeric: tabular-nums;
+  }
+  .times .v { color: var(--text); }
+  .times .a { color: var(--accent); }
+
+  #timeline {
+    position: relative;
+    height: 56px;
+    border-radius: 6px;
+    background: var(--surface-2);
+    border: 1px solid var(--line);
+    cursor: pointer;
+    touch-action: none;
+    user-select: none;
+  }
+  #filmstrip {
+    position: absolute; inset: 0;
+    width: 100%; height: 100%;
+    border-radius: 5px;
+    display: block;
+  }
+  .shade {
+    position: absolute; top: 0; bottom: 0;
+    background: var(--shade);
+    pointer-events: none;
+  }
+  #shadeL { left: 0; border-radius: 5px 0 0 5px; }
+  #shadeR { right: 0; border-radius: 0 5px 5px 0; }
+
+  /* the selection box between the stoppers. dragging it slides the whole range */
+  #selBox {
+    position: absolute; top: -1px; bottom: -1px;
+    border-top: 2px solid var(--accent);
+    border-bottom: 2px solid var(--accent);
+    cursor: grab;
+  }
+  #selBox:active { cursor: grabbing; }
+
+  /* the stoppers themselves: a bracket each side of the selection, with a fat
+     enough hit area that you can grab them on a touchscreen */
+  .stopper {
+    position: absolute; top: -1px; bottom: -1px;
+    width: 14px;
+    background: var(--accent);
+    cursor: ew-resize;
+    display: flex; align-items: center; justify-content: center;
+    z-index: 2;
+    outline: none;
+  }
+  .stopper::after {
+    content: ""; width: 2px; height: 18px; border-radius: 1px;
+    background: var(--on-accent); opacity: .6;
+  }
+  .stopper::before {
+    content: ""; position: absolute; inset: -6px -10px;
+  }
+  #handleIn  { border-radius: 6px 0 0 6px; transform: translateX(-100%); }
+  #handleOut { border-radius: 0 6px 6px 0; }
+  .stopper:focus-visible { box-shadow: 0 0 0 2px var(--text); }
+
+  #playhead {
+    position: absolute; top: -6px; bottom: -3px;
+    width: 2px; margin-left: -1px;
+    background: var(--text);
+    pointer-events: none;
+    z-index: 3;
+  }
+  #playhead::before {
+    content: ""; position: absolute; top: 0; left: -4px;
+    border: 5px solid transparent; border-top-color: var(--text);
+  }
+
+  .keys { font-family: var(--mono); font-size: 10.5px; color: var(--faint); white-space: nowrap; }
+  .keys kbd {
+    font: inherit; color: var(--muted);
+    background: var(--surface-2); border: 1px solid var(--line);
+    border-bottom-width: 2px; border-radius: 4px; padding: 0 5px;
+  }
+
+  /* ---- status toast -------------------------------------------------------- */
+  #status {
+    position: fixed;
+    top: 62px; left: 50%;
+    transform: translateX(-50%);
+    z-index: 30;
+    max-width: calc(100vw - 28px);
+    font-family: var(--mono);
+    font-size: 12.5px;
+    padding: 8px 15px;
+    border-radius: 6px;
+    background: var(--surface);
+    border: 1px solid var(--line);
+    opacity: 0;
+    transition: opacity .2s;
+    pointer-events: none;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  #status.show { opacity: 1; }
+  #status.error { border-color: var(--danger); color: var(--danger); }
+  #status.busy  { border-color: var(--accent); color: var(--accent); }
+
+  /* ---- the drag-and-drop overlay ------------------------------------------- */
+  #drop {
+    position: fixed; inset: 0; z-index: 40;
+    display: none;
+    align-items: center; justify-content: center;
+    font-family: var(--mono); font-size: 15px; letter-spacing: .05em;
+    color: var(--accent);
+    background: rgba(13,15,18,.82);
+    border: 2px dashed var(--accent);
+    pointer-events: none;
+  }
+  #drop.show { display: flex; }
+
+  /* ---- export progress and the finished-GIF card --------------------------- */
+  .overlay {
+    position: fixed; inset: 0; z-index: 50;
+    display: none; align-items: center; justify-content: center;
+    padding: 16px;
+    background: rgba(13,15,18,.78);
+  }
+  .overlay.show { display: flex; }
+  .card {
+    width: min(440px, 100%);
+    max-height: 100%;
+    overflow-y: auto;
+    display: grid; gap: 12px;
+    padding: 16px;
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    font-family: var(--mono); font-size: 12px; color: var(--muted);
+  }
+  .card .row { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+  .bar { height: 4px; border-radius: 2px; background: var(--line); overflow: hidden; }
+  #capfill { height: 100%; width: 0; background: var(--accent); transition: width .1s linear; }
+
+  #resultCard { width: min(720px, 100%); }
+  #resultImg {
+    display: block; max-width: 100%; max-height: 60vh; margin: 0 auto;
+    border-radius: 6px;
+    /* a checkerboard so you can tell letterboxing from the GIF itself */
+    background: repeating-conic-gradient(var(--surface-2) 0 25%, var(--bg) 0 50%) 0 0 / 16px 16px;
+  }
+  #resultInfo { color: var(--text); }
+  .card .actions { display: flex; gap: 8px; justify-content: flex-end; }
+
+  /* ---- small screens ------------------------------------------------------- */
+  @media (max-width: 720px) {
+    body {
+      display: flex; flex-direction: column;
+      overflow: auto; height: auto; min-height: 100%;
+    }
+    .brand { display: none; }
+    .keys { display: none; }
+    input[type="url"] { width: auto; flex: 1; }
+    #rail { flex-wrap: wrap; }
+    #rail .rail-group:last-child { flex: 1 1 100%; }
+    #rail .divider { display: none; }
+    /* #main dissolves so the dock can slot in between the video and the
+       settings. that keeps the timeline right under what it's scrubbing
+       instead of below a screen of sliders */
+    #main { display: contents; }
+    #rail  { order: 0; }
+    #stage { order: 1; min-height: 34vh; }
+    #dock  { order: 2; }
+    #panel { order: 3; margin: 14px; max-height: none; align-self: stretch; }
+    #video { max-height: 60vh; }
+    .dock-row { flex-wrap: wrap; }
+  }
+</style>
+</head>
+<body>
+
+<header id="rail">
+  <div class="brand">clip <b>station</b></div>
+  <div class="rail-group">
+    <label class="filelabel" for="file">Open video</label>
+    <input type="file" id="file" accept="video/*,.mkv,.mov,.m4v,.webm,.ogv" />
+  </div>
+  <div class="divider"></div>
+  <div class="rail-group">
+    <input type="url" id="urlInput" placeholder="https://example.com/clip.mp4" spellcheck="false" />
+    <button id="urlBtn">Load URL</button>
+  </div>
+</header>
+
+<div id="main">
+  <section id="stage">
+    <div id="empty">
+      <div class="big">Drop a video here</div>
+      <div>or open one from the bar above, or paste a link</div>
+      <div class="hint">nothing gets uploaded: the video is decoded and the GIF is built right in your browser</div>
+    </div>
+    <video id="video" playsinline muted preload="auto"></video>
+  </section>
+
+  <aside id="panel">
+    <div class="phead">
+      <span>gif <b>settings</b></span>
+      <button class="advbtn" id="advBtn" title="Show every setting">advanced</button>
+    </div>
+    <div class="pbody">
+
+      <div class="ctl simple-ctl">
+        <div class="lbl"><span>Size</span><span class="val" id="sizeVal"></span></div>
+        <div class="seg" id="sizeSeg">
+          <button data-width="320">S</button>
+          <button data-width="480">M</button>
+          <button data-width="640">L</button>
+          <button data-width="0">Full</button>
+        </div>
+      </div>
+
+      <div class="ctl simple-ctl">
+        <div class="lbl"><span>Smoothness</span><span class="val" id="smoothVal"></span></div>
+        <div class="seg" id="smoothSeg">
+          <button data-delay="10">Low</button>
+          <button data-delay="7">Med</button>
+          <button data-delay="5">High</button>
+          <button data-delay="4">Max</button>
+        </div>
+      </div>
+
+      <div class="ctl simple-ctl">
+        <div class="lbl"><span>Quality</span><span class="val" id="qualityVal"></span></div>
+        <div class="seg" id="qualitySeg">
+          <button data-quality="0">Small</button>
+          <button data-quality="1">Balanced</button>
+          <button data-quality="2">Best</button>
+        </div>
+      </div>
+
+      <div class="ctl adv-ctl">
+        <div class="lbl"><span>Width</span><span class="val" id="widthVal"></span></div>
+        <input type="range" id="widthRange" min="64" max="1280" step="8" />
+      </div>
+
+      <div class="ctl adv-ctl">
+        <div class="lbl"><span>Frame rate</span><span class="val" id="fpsVal"></span></div>
+        <input type="range" id="fpsRange" min="1" max="50" step="1" />
+      </div>
+
+      <div class="ctl adv-ctl">
+        <div class="lbl"><span>Colours</span><span class="val" id="coloursVal"></span></div>
+        <input type="range" id="coloursRange" min="2" max="256" step="1" />
+      </div>
+
+      <div class="ctl adv-ctl">
+        <div class="lbl"><span>Palette</span></div>
+        <div class="seg" id="paletteSeg">
+          <button data-palette="global" title="One colour table shared by every frame. smaller file">Shared</button>
+          <button data-palette="frame" title="A colour table per frame. better colour, bigger file">Per frame</button>
+        </div>
+      </div>
+
+      <div class="ctl adv-ctl">
+        <div class="lbl"><span>Playback speed</span><span class="val" id="speedVal"></span></div>
+        <input type="range" id="speedRange" min="0.25" max="4" step="0.25" />
+      </div>
+
+      <div class="ctl adv-ctl">
+        <div class="lbl"><span>Loop</span></div>
+        <div class="seg" id="loopSeg">
+          <button data-repeat="0">Forever</button>
+          <button data-repeat="-1">Once</button>
+          <button data-repeat="2">3 times</button>
+        </div>
+      </div>
+
+      <div class="ctl">
+        <div class="lbl"><span>Boomerang</span></div>
+        <div class="seg" id="boomSeg">
+          <button data-boom="0">Off</button>
+          <button data-boom="1" title="Play forward then backward, so the loop has no jump">On</button>
+        </div>
+      </div>
+
+      <div class="readout">
+        <div class="row"><span>clip</span><span class="val" id="clipVal">-</span></div>
+        <div class="row"><span>output</span><span class="val" id="outVal">-</span></div>
+        <div class="row"><span>frames</span><span class="val" id="framesVal">-</span></div>
+        <div class="row"><span>gif length</span><span class="val" id="lengthVal">-</span></div>
+      </div>
+      <div class="hint error" id="frameWarn" hidden></div>
+
+      <button class="primary" id="exportBtn" disabled>Make GIF</button>
+    </div>
+  </aside>
+</div>
+
+<footer id="dock" class="disabled">
+  <div class="dock-row">
+    <button class="iconbtn" id="playBtn" title="Play / pause (space)" aria-label="Play">
+      <svg class="main" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 2.5v11l9-5.5z"/></svg>
+      <svg class="alt" viewBox="0 0 16 16" aria-hidden="true"><path d="M3.5 2.5h3v11h-3zM9.5 2.5h3v11h-3z"/></svg>
+    </button>
+    <button class="iconbtn toggled" id="muteBtn" title="Mute / unmute (m)" aria-label="Unmute">
+      <svg class="main" viewBox="0 0 16 16" aria-hidden="true"><path d="M2 6h3l4-3.5v11L5 10H2zM11 5.2a4 4 0 0 1 0 5.6l-.9-.9a2.7 2.7 0 0 0 0-3.8z"/></svg>
+      <svg class="alt" viewBox="0 0 16 16" aria-hidden="true"><path d="M2 6h3l4-3.5v11L5 10H2zM10.5 6.1l.8-.8 1.7 1.7 1.7-1.7.8.8L13.8 7.8l1.7 1.7-.8.8-1.7-1.7-1.7 1.7-.8-.8 1.7-1.7z"/></svg>
+    </button>
+    <span class="times"><span class="v" id="timeNow">0:00.00</span> / <span id="timeTotal">0:00.00</span></span>
+    <span class="spacer"></span>
+    <span class="times">in <span class="a" id="inVal">0:00.00</span> out <span class="a" id="outValTime">0:00.00</span> <span id="lenVal">(0.00 s)</span></span>
+    <button class="smallbtn" id="setInBtn" title="Move the start stopper to the playhead (i)">Set in</button>
+    <button class="smallbtn" id="setOutBtn" title="Move the end stopper to the playhead (o)">Set out</button>
+    <button class="smallbtn on" id="loopSelBtn" title="Loop playback inside the selection (l)">Loop sel</button>
+  </div>
+  <div id="timeline">
+    <canvas id="filmstrip"></canvas>
+    <div class="shade" id="shadeL"></div>
+    <div class="shade" id="shadeR"></div>
+    <div id="selBox"></div>
+    <div class="stopper" id="handleIn" tabindex="0" role="slider" aria-label="GIF start"></div>
+    <div class="stopper" id="handleOut" tabindex="0" role="slider" aria-label="GIF end"></div>
+    <div id="playhead"></div>
+  </div>
+  <div class="dock-row">
+    <span class="keys"><kbd>space</kbd> play <kbd>i</kbd>/<kbd>o</kbd> set in/out <kbd>&larr;</kbd><kbd>&rarr;</kbd> step (<kbd>shift</kbd> 1 s) <kbd>l</kbd> loop sel</span>
+  </div>
+</footer>
+
+<div id="status"></div>
+<div id="drop">drop a video to load it</div>
+
+<div class="overlay" id="capture">
+  <div class="card">
+    <div class="row"><span id="capLabel">Working</span><span id="capPct">0%</span></div>
+    <div class="bar"><div id="capfill"></div></div>
+    <div class="actions"><button id="cancelBtn">Cancel</button></div>
+  </div>
+</div>
+
+<div class="overlay" id="result">
+  <div class="card" id="resultCard">
+    <img id="resultImg" alt="The finished GIF" />
+    <div class="row"><span id="resultInfo"></span></div>
+    <div class="actions">
+      <button id="closeResultBtn">Close</button>
+      <button class="primary" id="downloadBtn">Download</button>
+    </div>
+  </div>
+</div>
+
+<script type="module" src="app.js"></script>
+</body>
+</html>
