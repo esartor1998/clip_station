@@ -131,6 +131,23 @@
   }
   #video.show { display: block; }
 
+  /* the YouTube iframe is sized to 16:9 inside whatever room the stage has.
+     the wrapper is its own size container so the box can use cq units */
+  #ytWrap {
+    position: absolute; inset: 14px;
+    display: none; align-items: center; justify-content: center;
+    container-type: size;
+  }
+  #ytWrap.show { display: flex; }
+  #ytBox {
+    width: min(100cqw, calc(100cqh * 16 / 9));
+    aspect-ratio: 16 / 9;
+    border-radius: 6px; overflow: hidden;
+    background: #000;
+    box-shadow: 0 0 0 1px var(--line);
+  }
+  #ytBox iframe { display: block; width: 100%; height: 100%; border: 0; }
+
   #empty {
     display: grid; gap: 12px; justify-items: center; text-align: center;
     padding: 34px 40px;
@@ -170,6 +187,18 @@
     border-radius: 4px; padding: 2px 7px; cursor: pointer; line-height: 1.4;
   }
   .advbtn.on { background: var(--accent-dim); color: var(--accent); border-color: var(--accent); }
+
+  /* gif settings for a local video, the section fetcher for a YouTube one */
+  #panel .yt-body { display: none; }
+  #panel.yt .gif-body { display: none; }
+  #panel.yt .yt-body { display: grid; }
+  #panel.yt .advbtn { display: none; }
+  .yt-title {
+    font-size: 13px; line-height: 1.4; color: var(--text);
+    overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+  }
+  #ytBackBtn { justify-self: start; }
+  #ytBackBtn[hidden] { display: none; }
 
   /* presets normally, the full set of sliders once advanced mode is on */
   #panel .adv-ctl { display: none; }
@@ -219,7 +248,7 @@
   .hint.error { color: var(--danger); }
   .hint[hidden] { display: none; }
 
-  #exportBtn { width: 100%; padding: 10px 13px; }
+  #exportBtn, #ytFetchBtn { width: 100%; padding: 10px 13px; }
 
   /* ---- the dock: transport, times, and the timeline ------------------------ */
   #dock {
@@ -253,6 +282,29 @@
   }
   .times .v { color: var(--text); }
   .times .a { color: var(--accent); }
+
+  /* the in/out times double as text inputs: plain text until you click one,
+     then it looks like the input it is. sized for up to an hour-long source
+     ("1:23:45.67") without clipping */
+  input.timeedit {
+    width: 10ch; /* fits up to "1:23:45.67" (an hour-plus source) without scrolling */
+    font: inherit;
+    font-variant-numeric: tabular-nums;
+    color: var(--accent);
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: 4px;
+    padding: 1px 3px;
+    text-align: center;
+    cursor: text;
+  }
+  input.timeedit:hover { background: var(--surface-2); }
+  input.timeedit:focus {
+    background: var(--surface-2);
+    border-color: var(--accent);
+    outline: none;
+    color: var(--text);
+  }
 
   #timeline {
     position: relative;
@@ -385,6 +437,13 @@
   .card .row { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
   .bar { height: 4px; border-radius: 2px; background: var(--line); overflow: hidden; }
   #capfill { height: 100%; width: 0; background: var(--accent); transition: width .1s linear; }
+  /* while the server's cutting a YouTube section there's no progress to
+     report, only that it's working */
+  .bar.indeterminate #capfill {
+    width: 30% !important; transition: none;
+    animation: sweep 1.2s ease-in-out infinite;
+  }
+  @keyframes sweep { from { transform: translateX(-100%); } to { transform: translateX(340%); } }
 
   #resultCard { width: min(720px, 100%); }
   #resultImg {
@@ -431,7 +490,7 @@
   </div>
   <div class="divider"></div>
   <div class="rail-group">
-    <input type="url" id="urlInput" placeholder="https://example.com/clip.mp4" spellcheck="false" />
+    <input type="url" id="urlInput" placeholder="YouTube link, or https://example.com/clip.mp4" spellcheck="false" />
     <button id="urlBtn">Load URL</button>
   </div>
 </header>
@@ -440,18 +499,21 @@
   <section id="stage">
     <div id="empty">
       <div class="big">Drop a video here</div>
-      <div>or open one from the bar above, or paste a link</div>
+      <div>or open one from the bar above, or paste a link (YouTube works too)</div>
       <div class="hint">nothing gets uploaded: the video is decoded and the GIF is built right in your browser</div>
     </div>
     <video id="video" playsinline muted preload="auto"></video>
+    <div id="ytWrap"><div id="ytBox"></div></div>
   </section>
 
   <aside id="panel">
     <div class="phead">
-      <span>gif <b>settings</b></span>
+      <span id="panelTitle">gif <b>settings</b></span>
       <button class="advbtn" id="advBtn" title="Show every setting">advanced</button>
     </div>
-    <div class="pbody">
+    <div class="pbody gif-body">
+
+      <button class="smallbtn" id="ytBackBtn" hidden title="Back to the whole YouTube video, with your selection where you left it">&larr; back to the full video</button>
 
       <div class="ctl simple-ctl">
         <div class="lbl"><span>Size</span><span class="val" id="sizeVal"></span></div>
@@ -537,6 +599,19 @@
 
       <button class="primary" id="exportBtn" disabled>Make GIF</button>
     </div>
+
+    <div class="pbody yt-body">
+      <div class="yt-title" id="ytTitle"></div>
+      <div class="hint">find the moment and drop the stoppers roughly around it. the wheel zooms the timeline, z jumps to the selection. fetching pulls just that section (plus a little either side), then you fine-trim and make the GIF from it</div>
+      <div class="readout">
+        <div class="row"><span>video</span><span class="val" id="ytLenVal">-</span></div>
+        <div class="row"><span>selection</span><span class="val" id="ytSelVal">-</span></div>
+        <div class="row"><span>max section</span><span class="val" id="ytMaxVal">-</span></div>
+        <div class="row"><span>will fetch</span><span class="val" id="ytWindowVal">-</span></div>
+      </div>
+      <div class="hint error" id="ytWarn" hidden></div>
+      <button class="primary" id="ytFetchBtn" disabled>Fetch section</button>
+    </div>
   </aside>
 </div>
 
@@ -552,10 +627,16 @@
     </button>
     <span class="times"><span class="v" id="timeNow">0:00.00</span> / <span id="timeTotal">0:00.00</span></span>
     <span class="spacer"></span>
-    <span class="times">in <span class="a" id="inVal">0:00.00</span> out <span class="a" id="outValTime">0:00.00</span> <span id="lenVal">(0.00 s)</span></span>
+    <span class="times">in <input type="text" class="timeedit" id="inVal" value="0:00.00"
+      inputmode="decimal" autocomplete="off" spellcheck="false"
+      title="Click to type a start time" /> out <input type="text" class="timeedit" id="outValTime"
+      value="0:00.00" inputmode="decimal" autocomplete="off" spellcheck="false"
+      title="Click to type an end time" /> <span id="lenVal">(0.00 s)</span></span>
     <button class="smallbtn" id="setInBtn" title="Move the start stopper to the playhead (i)">Set in</button>
     <button class="smallbtn" id="setOutBtn" title="Move the end stopper to the playhead (o)">Set out</button>
     <button class="smallbtn on" id="loopSelBtn" title="Loop playback inside the selection (l)">Loop sel</button>
+    <button class="smallbtn" id="zoomSelBtn" title="Zoom the timeline to the selection (z)">Zoom sel</button>
+    <button class="smallbtn" id="zoomFitBtn" title="Show the whole video (z)">Fit</button>
   </div>
   <div id="timeline">
     <canvas id="filmstrip"></canvas>
@@ -567,7 +648,7 @@
     <div id="playhead"></div>
   </div>
   <div class="dock-row">
-    <span class="keys"><kbd>space</kbd> play <kbd>i</kbd>/<kbd>o</kbd> set in/out <kbd>&larr;</kbd><kbd>&rarr;</kbd> step (<kbd>shift</kbd> 1 s) <kbd>l</kbd> loop sel</span>
+    <span class="keys"><kbd>space</kbd> play <kbd>i</kbd>/<kbd>o</kbd> set in/out <kbd>&larr;</kbd><kbd>&rarr;</kbd> step (<kbd>shift</kbd> 1 s) <kbd>l</kbd> loop sel <kbd>z</kbd> zoom to sel / fit <kbd>wheel</kbd> zoom <kbd>shift</kbd>+<kbd>wheel</kbd> pan <span id="maxLenHint"></span></span>
   </div>
 </footer>
 
@@ -577,7 +658,7 @@
 <div class="overlay" id="capture">
   <div class="card">
     <div class="row"><span id="capLabel">Working</span><span id="capPct">0%</span></div>
-    <div class="bar"><div id="capfill"></div></div>
+    <div class="bar" id="capBar"><div id="capfill"></div></div>
     <div class="actions"><button id="cancelBtn">Cancel</button></div>
   </div>
 </div>
