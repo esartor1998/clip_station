@@ -99,7 +99,7 @@ const PROXY_DISABLED = /^(1|true|yes)$/i.test(process.env.DISABLE_PROXY || '');
 const ALLOWED_TYPE_RE = /^(video\/[\w.+-]+|application\/(octet-stream|mp4|ogg)|binary\/octet-stream)$/i;
 
 // ---- abuse controls ---------------------------------------------------------
-// past SSRF the main risk is volume: someone spamming links to huge files to
+// past SSRF the main risk is volume i.e. spamming links to huge files to
 // chew up our bandwidth. unlike a 3D model with a pile of textures, one video
 // is one request, so the bucket is small and refills slowly. the concurrency
 // caps keep sockets and memory bounded
