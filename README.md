@@ -34,8 +34,13 @@ it's already running on, so there's no Deno to install:
 ```bash
 sudo apt install ffmpeg
 python3 -m venv .venv && .venv/bin/pip install -U 'yt-dlp[default]'
-YTDLP_PATH=.venv/bin/yt-dlp npm start
+npm start
 ```
+
+The server uses `.venv/bin/yt-dlp` automatically when it's there. Don't use
+the distro's `yt-dlp` package: Debian's is months out of date, and YouTube
+breaks old versions. If the only yt-dlp it can find is too old, the YouTube
+panel says so instead of failing on every fetch.
 
 Without yt-dlp everything else works, and YouTube links still open for
 browsing; the panel says why fetching is off.
@@ -96,7 +101,7 @@ or `shift` + wheel pans. While zoomed, playback pages the view along.
 | `PROXY_STREAM_TIMEOUT_MS` | `90000` | whole-request deadline including streaming |
 
 | `DISABLE_YOUTUBE` | *(unset)* | set to `1` to turn off YouTube fetching (links still open for browsing) |
-| `YTDLP_PATH` | `yt-dlp` | the yt-dlp binary |
+| `YTDLP_PATH` | `.venv/bin/yt-dlp`, else `yt-dlp` on `PATH` | the yt-dlp binary |
 | `YT_COOKIES` | *(unset)* | path to a Netscape `cookies.txt`, for when YouTube bot-checks the server |
 | `YT_MAX_SECTION_S` | `120` | longest window one fetch can pull, padding included |
 | `YT_MAX_HEIGHT` | `720` | resolution cap for fetched sections |

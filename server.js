@@ -361,7 +361,12 @@ app.get('/proxy', async (req, res) => {
 // files, no plugins, and a throwaway HOME. passing a user URL straight to
 // yt-dlp would be an SSRF hole, since its generic extractor fetches anything
 const YT_DISABLED = /^(1|true|yes)$/i.test(process.env.DISABLE_YOUTUBE || '');
-const YTDLP_PATH = process.env.YTDLP_PATH || 'yt-dlp';
+// the project's own .venv wins over whatever's on PATH. distro packages of
+// yt-dlp run months behind (Debian 13 ships 2025.04.30), and YouTube breaks
+// anything that old, so a system-wide install is the last resort, not the
+// default. looked up here so the systemd unit needs no YTDLP_PATH of its own
+const LOCAL_YTDLP = path.join(__dirname, '.venv', 'bin', 'yt-dlp');
+const YTDLP_PATH = process.env.YTDLP_PATH || (fs.existsSync(LOCAL_YTDLP) ? LOCAL_YTDLP : 'yt-dlp');
 const YT_COOKIES = process.env.YT_COOKIES || '';                           // Netscape cookies.txt, for bot checks
 const YT_MAX_SECTION_S = Number(process.env.YT_MAX_SECTION_S) || 120;      // longest window one request can pull
 const YT_MAX_HEIGHT = Number(process.env.YT_MAX_HEIGHT) || 720;            // px. a GIF never needs more
@@ -466,26 +471,50 @@ const takeYtToken = makeRateLimiter(YT_RATE_BURST, YT_RATE_REFILL);
 const ytInFlightPerIp = new Map();
 let ytInFlight = 0;
 
-// checked once at startup so the page can say "not installed" up front
-// instead of failing after someone's picked their section
+// checked once at startup so the page can say "not installed" or "too old"
+// up front, instead of failing after someone's picked their section
 let ytStatus = { enabled: false, reason: 'still checking for yt-dlp' };
+
+// the output of one quick yt-dlp run, or null if it couldn't be started at all
+function readYtdlp(args) {
+  return new Promise((resolve) => {
+    const p = spawn(YTDLP_PATH, args, { stdio: ['ignore', 'pipe', 'ignore'] });
+    let out = '';
+    p.stdout.on('data', (d) => { out += d; });
+    p.on('error', () => resolve(null));
+    p.on('close', (code) => resolve(code === 0 ? out : null));
+  });
+}
+
+async function checkYtdlp() {
+  const version = await readYtdlp(['--version']);
+  if (version === null) {
+    ytStatus = { enabled: false, reason: `yt-dlp isn't installed on this server (looked for "${YTDLP_PATH}")` };
+    console.warn(`youtube: ${ytStatus.reason}`);
+    return;
+  }
+  // feature-tested rather than compared against a version number. every
+  // fetch passes --js-runtimes (YouTube's player challenges need it), and a
+  // yt-dlp without it dies with "no such option" on every single request
+  const help = await readYtdlp(['--help']);
+  if (!help || !help.includes('--js-runtimes')) {
+    ytStatus = {
+      enabled: false,
+      reason: `yt-dlp ${version.trim()} at "${YTDLP_PATH}" is too old for YouTube, update it (see the README)`,
+    };
+    console.warn(`youtube: ${ytStatus.reason}`);
+    return;
+  }
+  ytStatus = { enabled: true, version: version.trim() };
+  console.log(`youtube: yt-dlp ${ytStatus.version} (${YTDLP_PATH}), ${YT_MAX_SECTION_S}s max section, ${YT_MAX_HEIGHT}p cap`);
+  console.log(`youtube: niceness ${HAS_IONICE ? 'ionice+nice' : HAS_NICE ? 'nice' : 'unavailable'}, `
+    + `load gate ${YT_LOAD_FACTOR > 0 ? `loadavg > cpus x ${YT_LOAD_FACTOR}` : 'off'}`);
+}
+
 if (YT_DISABLED) {
   ytStatus = { enabled: false, reason: 'YouTube fetching is turned off on this server' };
 } else {
-  const probe = spawn(YTDLP_PATH, ['--version'], { stdio: ['ignore', 'pipe', 'ignore'] });
-  let out = '';
-  probe.stdout.on('data', (d) => { out += d; });
-  probe.on('error', () => {
-    ytStatus = { enabled: false, reason: `yt-dlp isn't installed on this server (looked for "${YTDLP_PATH}")` };
-    console.warn(`youtube: ${ytStatus.reason}`);
-  });
-  probe.on('close', (code) => {
-    if (code !== 0) return;
-    ytStatus = { enabled: true, version: out.trim() };
-    console.log(`youtube: yt-dlp ${ytStatus.version}, ${YT_MAX_SECTION_S}s max section, ${YT_MAX_HEIGHT}p cap`);
-    console.log(`youtube: niceness ${HAS_IONICE ? 'ionice+nice' : HAS_NICE ? 'nice' : 'unavailable'}, `
-      + `load gate ${YT_LOAD_FACTOR > 0 ? `loadavg > cpus x ${YT_LOAD_FACTOR}` : 'off'}`);
-  });
+  checkYtdlp();
 }
 
 // the stderr lines people actually hit, turned into something readable. the
